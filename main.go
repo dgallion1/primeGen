@@ -16,9 +16,9 @@ import (
 	"github.com/klauspost/compress/zstd"
 	
 "github.com/dgallion1/primeGen/logging"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
+	
 )
+var logIt logging.MyLogger
 
 // generateStreams divides a huge number into ranges of maxPerWorker and spawns numWorkers to execute primesieve on each range.
 func generateStreams(startValue, hugeNum, numWorkers, maxPerWorker int64) []chan map[string]interface{} {
@@ -32,7 +32,7 @@ func generateStreams(startValue, hugeNum, numWorkers, maxPerWorker int64) []chan
 	
 	// Calculate the range each worker should process.
 	rangesPerWorker := hugeNum / numWorkers // Ceiling division
-	log.Info().Msgf("Ranges per worker: %d hugeNum: %d\n", rangesPerWorker, hugeNum)
+	logIt.Info().Msgf("Ranges per worker: %d hugeNum: %d", rangesPerWorker, hugeNum)
 	for i := int64(0); i < numWorkers; i++ {
 		start := startValue + i*rangesPerWorker
 		end := start + rangesPerWorker
@@ -55,7 +55,7 @@ func generateStreams(startValue, hugeNum, numWorkers, maxPerWorker int64) []chan
 			close(ch)
 		}(channels[i], start, end)
 	}
-	log.Info().Msgf("Total workers: %d\n", len(channels))
+	logIt.Info().Msgf("Total workers: %d", len(channels))
 	// Wait for all goroutines to finish
 	go func() {
 		wg.Wait()
@@ -67,16 +67,16 @@ func generateStreams(startValue, hugeNum, numWorkers, maxPerWorker int64) []chan
 // runPrimeSieve runs the primesieve command for the given range and returns the primes as a slice of int64.
 func runPrimeSieve(start, end int64) []int64 {
 	time.Sleep(time.Millisecond *time.Duration(rand.Int63n(2000)))
-	log.Info().Msgf("Spawning worker for range: ", start, end)
+	logIt.Info().Msgf("Spawning worker for range: %d - %d", start, end)
 	cmd := exec.Command("primesieve", fmt.Sprint(start), fmt.Sprint(end), "--print")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		log.Error().Err(err).Msgf("Error creating stdout pipe: %v\n", err)
+		logIt.Error().Err(err).Msgf("Error creating stdout pipe: %v", err)
 		return nil
 	}
 
 	if err := cmd.Start(); err != nil {
-		log.Error().Msgf("Error starting command: %v\n", err)
+		logIt.Error().Msgf("Error starting command: %v", err)
 		return nil
 	}
 
@@ -102,12 +102,12 @@ func runPrimeSieve(start, end int64) []int64 {
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Error().Err(err).Msgf("Error reading output: %v\n", err)
+		logIt.Error().Err(err).Msgf("Error reading output: %v", err)
 		return nil
 	}
 
 	if err := cmd.Wait(); err != nil {
-		log.Error().Err(err).Msgf("Error waiting for command: %v\n", err)
+		logIt.Error().Err(err).Msgf("Error waiting for command: %v", err)
 		return nil
 	}
 	//fmt.Printf("Range [%d - %d] has %d primes\n", start, end, len(primes))
@@ -122,7 +122,7 @@ func generateHugeStreams(initialStart, stepSize, end, numWorkers, maxPerWorker i
 	for i := int64(initialStart); i*stepSize < end; i++ {
 		startValue := initialStart + i*stepSize
 		hugeNum := startValue + stepSize
-		log.Info().Msgf("Generating streams for range [%d - %d]\n", startValue, hugeNum)
+		logIt.Info().Msgf("Generating streams for range [%d - %d]", startValue, hugeNum)
 		channels := generateStreams(startValue, hugeNum, numWorkers, maxPerWorker)
 
 		for j, ch := range channels {
@@ -141,28 +141,28 @@ func generateHugeStreams(initialStart, stepSize, end, numWorkers, maxPerWorker i
 					filename := fmt.Sprintf("out/%d-%d.txt", start, end)
 					file, err := os.Create(filename)
 					if err != nil {
-						log.Error().Err(err).Msgf("Error creating file %s: %v\n", filename, err)
+						logIt.Error().Err(err).Msgf("Error creating file %s: %v", filename, err)
 						return
 					}
 					defer file.Close()
 					if true {
 						zstdWriter, err := zstd.NewWriter(file)
 						if err != nil {
-							log.Error().Err(err).Msgf("Error creating zstd writer for file %s: %v", filename, err)
+							logIt.Error().Err(err).Msgf("Error creating zstd writer for file %s: %v", filename, err)
 							return
 						}
 						defer zstdWriter.Close()
 						// Use binary.Write to write the array to the zstd writer
 						err = binary.Write(zstdWriter, binary.LittleEndian, primes)
 						if err != nil {
-							log.Error().Err(err).Msgf("Error writing to file %s: %v\n", filename, err)
+							logIt.Error().Err(err).Msgf("Error writing to file %s: %v", filename, err)
 							return
 						}
 
 						// Flush the zstd writer to ensure all data is written
 						err = zstdWriter.Flush()
 						if err != nil {
-							log.Error().Err(err).Msgf("Error writing to file %s: %v\n", filename, err)
+							logIt.Error().Err(err).Msgf("Error writing to file %s: %v", filename, err)
 							return
 						}
 
@@ -171,7 +171,7 @@ func generateHugeStreams(initialStart, stepSize, end, numWorkers, maxPerWorker i
 						file.Write([]byte(fmt.Sprintf("%v\n", primes)))
 
 					}
-					log.Info().Msgf("Worker %d: Range [%d - %d] saved to %s\n", j, start, end, filename)
+					logIt.Info().Msgf("Worker %d: Range [%d - %d] saved to %s", j, start, end, filename)
 				})
 			}
 		}
@@ -180,15 +180,14 @@ func generateHugeStreams(initialStart, stepSize, end, numWorkers, maxPerWorker i
 }
 
 func main() {
-	 // Initialize zerolog
-	 zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	 log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
- 	logging.Configure(logging.Config{
+	os.Mkdir("logs", 0755)
+	
+ 	logIt = logging.Configure(logging.Config{
 		ConsoleLoggingEnabled: true,
 		FileLoggingEnabled:    true,
 		EncodeLogsAsJson:      true,
 		Directory:             "./logs",
-		Filename:              "zcorp.log",
+		Filename:              "primeGen.log",
 		MaxSize:               1000000, // 1MB
 		MaxBackups:            3,
 		MaxAge:                28, // days

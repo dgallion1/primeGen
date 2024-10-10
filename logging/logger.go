@@ -2,10 +2,13 @@ package logging
 
 import (
 	"fmt"
+	"runtime"
+	"strconv"
 	"strings"
-	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/pkgerrors"
+
 	//"github.com/rs/zerolog/log"
 	"io"
 	"os"
@@ -44,7 +47,10 @@ var LogIt MyLogger
 
 func NewLogger() MyLogger {
 	// create output configuration
-	output := zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339}
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
+
+	output := zerolog.ConsoleWriter{Out: os.Stdout}
 
 	// Format level: fatal, error, debug, info, warn
 	output.FormatLevel = func(i interface{}) string {
@@ -62,8 +68,9 @@ func NewLogger() MyLogger {
 		return fmt.Sprintf("%s: ", i)
 	}
 
-	zerolog := zerolog.New(output).With().Timestamp().Logger()
-	LogIt = MyLogger{zerolog}
+	z := zerolog.New(output).With().Timestamp().Caller().Logger()
+
+	LogIt = MyLogger{z}
 	return LogIt
 }
 
@@ -97,7 +104,8 @@ func (l *MyLogger) LogFatal() *zerolog.Event {
 // will be rolled according to configuration set.
 func Configure(config Config) MyLogger {
 	var writers []io.Writer
-
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+	zerolog.ErrorStackMarshaler = pkgerrors.MarshalStack
 	if config.ConsoleLoggingEnabled {
 		writers = append(writers, zerolog.ConsoleWriter{Out: os.Stderr})
 	}
@@ -107,7 +115,7 @@ func Configure(config Config) MyLogger {
 	mw := io.MultiWriter(writers...)
 
 	// zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	logger := zerolog.New(mw).With().Caller().Timestamp().Logger()
+	logger := zerolog.New(mw).With().Timestamp().Logger().Hook(CallerFormatterHook{})
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	logger.Info().
 		Bool("fileLogging", config.FileLoggingEnabled).
@@ -137,4 +145,27 @@ func newRollingFile(config Config) io.Writer {
 		MaxSize:    config.MaxSize,    // megabytes
 		MaxAge:     config.MaxAge,     // days
 	}
+}
+
+// Custom hook to format the caller field for log files
+type CallerFormatterHook struct{}
+
+func (h CallerFormatterHook) Run(e *zerolog.Event, level zerolog.Level, msg string) {
+	pc, file, line, ok := runtime.Caller(3) // Adjust stack frame depth as needed
+	if ok {
+		fn := runtime.FuncForPC(pc)
+		shortFile := shortFilePath(file)
+		e.Str("caller", "["+shortFile+":"+lineString(line)+"] ("+fn.Name()+")")
+	}
+}
+
+// Helper function to extract only the filename (short path)
+func shortFilePath(path string) string {
+	// Get the base file name without the full path
+	return path[strings.LastIndex(path, "/")+1:]
+}
+
+// Helper to convert line number to string
+func lineString(line int) string {
+	return strconv.Itoa(line)
 }
