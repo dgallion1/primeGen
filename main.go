@@ -15,7 +15,7 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/klauspost/compress/zstd"
 	
-"github.com/ZeiterFarah/zcorp/server/logging"
+"github.com/dgallion1/primeGen/logging"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -183,7 +183,16 @@ func main() {
 	 // Initialize zerolog
 	 zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	 log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
- 
+ 	logging.Configure(logging.Config{
+		ConsoleLoggingEnabled: true,
+		FileLoggingEnabled:    true,
+		EncodeLogsAsJson:      true,
+		Directory:             "./logs",
+		Filename:              "zcorp.log",
+		MaxSize:               1000000, // 1MB
+		MaxBackups:            3,
+		MaxAge:                28, // days
+	})
 
 	var opts struct {
 		InitialStart int64 `short:"i" long:"initialStart" description:"Initial start value" default:"0"`
