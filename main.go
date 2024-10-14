@@ -68,7 +68,7 @@ func generateStreams(startValue, hugeNum, numWorkers, maxPerWorker int64) []chan
 func runPrimeSieve(start, end int64) []int64 {
 	time.Sleep(time.Millisecond *time.Duration(rand.Int63n(2000)))
 	logIt.Info().Msgf("Spawning worker for range: %d - %d", start, end)
-	cmd := exec.Command("primesieve", fmt.Sprint(start), fmt.Sprint(end), "--print")
+	cmd := exec.Command("primesieve", fmt.Sprint(start), fmt.Sprint(end), "-p", "-b")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		logIt.Error().Err(err).Msgf("Error creating stdout pipe: %v", err)

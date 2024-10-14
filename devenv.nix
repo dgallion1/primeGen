@@ -7,7 +7,8 @@
   # https://devenv.sh/packages/
   packages = [ pkgs.git 
     pkgs.go
-    pkgs.gcc
+    pkgs.gcc11
+    pkgs.gomp
     pkgs.templ
     pkgs.uv
     
@@ -22,6 +23,12 @@
     pkgs.python311Packages.tensorflow
     pkgs.python311Packages.trimesh
     pkgs.python311Packages.numpy-stl
+
+     pkgs.primesieve         # primesieve library
+      pkgs.pkg-config         # pkg-config to help find primesieve
+      pkgs.boost
+    
+      pkgs.cudaPackages_11.cudatoolkit 
   ];
 
   # https://devenv.sh/languages/
@@ -75,6 +82,14 @@
     build.exec = ''
       go build
     '';
+    compileS4.exec = ''
+      nvcc -arch=sm_86 -o s4 s4.cu /home/darrell/work/git/primesieve/libprimesieve.a -std=c++14 --expt-relaxed-constexpr -Xcompiler="-fpermissive" -lnvidia-ml
+      patchelf --set-rpath '/run/opengl-driver/lib:'$(patchelf --print-rpath s4) s4
+      '';
+    compileS3.exec = ''
+      nvcc -arch=sm_86 -o s3 s3.cu /home/darrell/work/git/primesieve/libprimesieve.a -std=c++14 --expt-relaxed-constexpr -Xcompiler="-fpermissive" -lnvidia-ml
+      patchelf --set-rpath '/run/opengl-driver/lib:'$(patchelf --print-rpath s3) s3
+      '';
   };
 
   #process-managers.overmind.enable= lib.mkOptionDefault true;
