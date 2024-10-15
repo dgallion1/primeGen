@@ -21,8 +21,6 @@ __device__ double atomicAddDouble(double* address, double value) {
     return __longlong_as_double(old);
 }
 
-
-
 __global__ void computeSum(double* partialSums, const char* signs, long long start, long long end, long long maxN) {
     extern __shared__ double shared[];  // Shared memory allocation
     long long i = blockIdx.x * blockDim.x + threadIdx.x + start;
@@ -34,7 +32,6 @@ __global__ void computeSum(double* partialSums, const char* signs, long long sta
         term = 1.0 / i;
         if (signs[i - start] == 0 && i > 4) {
             term = -term;
-            //printf("Neg %d thread %d: %f\n", blockIdx.x, tid, term);
         }
     }
     shared[tid] = term;
@@ -42,12 +39,14 @@ __global__ void computeSum(double* partialSums, const char* signs, long long sta
     // Synchronize to make sure all threads have written to shared memory
     __syncthreads();
 
-    // Reduction in shared memory to compute the block-level partial sum
+    // Reduction in shared memory to compute the block-level partial sum using Kahan summation
+    double c = 0.0;  // Compensation for lost low-order bits
     for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (tid < s && shared[tid] != 0.0 && s < 10) {
-            //printf("Block %d thread %d: %f  next: %f index:  %d+%d\n", blockIdx.x, tid, shared[tid],  shared[tid + s], tid, s);
-            shared[tid] += shared[tid + s];
-            //printf("Blxxk %d thread %d: %f\n", blockIdx.x, tid, shared[tid]);
+        if (tid < s) {
+            double y = shared[tid + s] - c;
+            double t = shared[tid] + y;
+            c = (t - shared[tid]) - y;
+            shared[tid] = t;
         }
         // Synchronize to ensure all threads have completed this step of reduction
         __syncthreads();
@@ -56,10 +55,8 @@ __global__ void computeSum(double* partialSums, const char* signs, long long sta
     // Write the result from the first thread of each block to global memory
     if (tid == 0) {
         partialSums[blockIdx.x] = shared[0];
-        //printf("Block %d partial sum: %f\n", blockIdx.x, shared[0]);
     }
 }
-
 
 void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize) {
     double totalResult = 0.0;
@@ -75,6 +72,17 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
     char* d_signs;
     if (cudaMalloc((void**)&d_signs, chunkSize * sizeof(char)) != cudaSuccess) {
         std::cerr << "Error allocating memory for signs on GPU." << std::endl;
+        return;
+    }
+
+    // Allocate partial sums array on GPU (reuse for each chunk)
+    double* d_partialSums;
+    int blks = 1024;  // Number of threads per block
+    int maxBlocksPerGrid = 65535;
+    int blocksPerGrid = std::min((chunkSize + blks - 1) / blks, maxBlocksPerGrid);
+    if (cudaMalloc((void**)&d_partialSums, blocksPerGrid * sizeof(double)) != cudaSuccess) {
+        std::cerr << "Error allocating memory for partial sums on GPU." << std::endl;
+        cudaFree(d_signs);
         return;
     }
 
@@ -122,19 +130,7 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
         // Copy signs array to device asynchronously
         if (cudaMemcpyAsync(d_signs, signs.data(), chunkSize * sizeof(char), cudaMemcpyHostToDevice, streams[streamIdx]) != cudaSuccess) {
             std::cerr << "Error copying signs to GPU." << std::endl;
-            cudaFree(d_signs);
-            for (int i = 0; i < numStreams; ++i) {
-                cudaStreamDestroy(streams[i]);
-            }
-            return;
-        }
-
-        int blks = 512;
-        // Allocate partial sums array on GPU for this specific kernel launch
-        int blocksPerGrid = std::min((chunkSize + blks - 1) / blks, 65535);
-        double* d_partialSums;
-        if (cudaMalloc((void**)&d_partialSums, blocksPerGrid * sizeof(double)) != cudaSuccess) {
-            std::cerr << "Error allocating memory for partial sums on GPU." << std::endl;
+            cudaFree(d_partialSums);
             cudaFree(d_signs);
             for (int i = 0; i < numStreams; ++i) {
                 cudaStreamDestroy(streams[i]);
@@ -145,12 +141,9 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
         // Launch kernel asynchronously
         computeSum<<<blocksPerGrid, blks, blks * sizeof(double), streams[streamIdx]>>>(d_partialSums, d_signs, start + 1, end, maxN);
 
-        // Wait for the stream to complete
-        cudaStreamSynchronize(streams[streamIdx]);
-
-        // Copy partial sums from GPU to host
+        // Copy partial sums from GPU to host asynchronously
         std::vector<double> partialSums(blocksPerGrid, 0.0);
-        if (cudaMemcpy(partialSums.data(), d_partialSums, blocksPerGrid * sizeof(double), cudaMemcpyDeviceToHost) != cudaSuccess) {
+        if (cudaMemcpyAsync(partialSums.data(), d_partialSums, blocksPerGrid * sizeof(double), cudaMemcpyDeviceToHost, streams[streamIdx]) != cudaSuccess) {
             std::cerr << "Error copying partial sums from GPU." << std::endl;
             cudaFree(d_partialSums);
             cudaFree(d_signs);
@@ -160,19 +153,26 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
             return;
         }
 
-        // Sum partial sums on the host
-        for (double partialSum : partialSums) {
-            totalResult += partialSum;
+        // Wait for all streams to complete before accumulating the result
+        for (int i = 0; i < numStreams; ++i) {
+            cudaStreamSynchronize(streams[i]);
         }
 
-        // Free device memory for partial sums
-        cudaFree(d_partialSums);
+        // Sum partial sums on the host using Kahan summation to reduce numerical error
+        double c = 0.0;  // Compensation for lost low-order bits
+        for (double partialSum : partialSums) {
+            double y = partialSum - c;
+            double t = totalResult + y;
+            c = (t - totalResult) - y;
+            totalResult = t;
+        }
 
         // Update the start for the next chunk
         start = end;
     }
 
     // Clean up GPU memory
+    cudaFree(d_partialSums);
     cudaFree(d_signs);
     for (int i = 0; i < numStreams; ++i) {
         cudaStreamDestroy(streams[i]);
@@ -183,8 +183,6 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
     // Reset CUDA device
     cudaDeviceReset();
 }
-
-
 
 int main(int argc, char* argv[]) {
     if (argc != 2) {
@@ -201,8 +199,8 @@ int main(int argc, char* argv[]) {
     // Set the maximum value of N for the calculation
     long long maxN = highestPrime;
 
-    // Define chunk size for handling large number of primes (reduced to fit memory limits)
-    int chunkSize = 10000; // Increased chunk size to improve GPU utilization
+    // Define chunk size for handling large number of primes (increased to improve GPU utilization)
+    int chunkSize = 10000000;  // Further increased chunk size to improve GPU utilization
 
     // Call calculateSumInChunks to handle large prime arrays in chunks
     calculateSumInChunks(highestPrime, maxN, chunkSize);
