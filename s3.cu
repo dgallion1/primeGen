@@ -1,4 +1,7 @@
 #include <iostream>
+#include <iomanip>
+#include <limits>
+
 #include <cuda_runtime.h>
 
 __global__ void harmonic_sum_kernel(double *partial_sums, long long n) {
@@ -7,7 +10,7 @@ __global__ void harmonic_sum_kernel(double *partial_sums, long long n) {
 
     // Each thread handles part of the sum
     for (long long i = idx + 1; i <= n; i += blockDim.x * gridDim.x) {
-        sum += 1.0 / i;
+        sum += 1.0 / (double) i;
     }
 
     partial_sums[idx] = sum; // Store each thread's partial sum
@@ -64,10 +67,11 @@ double harmonic_sum(long long n) {
 
 int main() {
     long long n = 10E7;  // Number of terms
-    double result;
-
+    double result,aa;
+    aa=1.123456789123456789;
     result = harmonic_sum(n);
-
+    std::cout << std::fixed;
+    std::cout << std::setprecision(std::numeric_limits<double>::max_digits10);
     std::cout << n << ") Harmonic sum: " << result << std::endl;
     return 0;
 }
