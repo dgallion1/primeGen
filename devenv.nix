@@ -28,7 +28,7 @@
       pkgs.pkg-config         # pkg-config to help find primesieve
       pkgs.boost
     
-      pkgs.cudaPackages_11.cudatoolkit 
+      pkgs.cudaPackages_12.cudatoolkit 
   ];
 
   # https://devenv.sh/languages/
@@ -83,9 +83,12 @@
       go build
     '';
     compileS4.exec = ''
-      nvcc -arch=sm_86 -o s4 s4.cu /home/darrell/work/git/primesieve/libprimesieve.a -std=c++14 --expt-relaxed-constexpr -Xcompiler="-fpermissive" -lnvidia-ml
+      nvcc -arch=sm_60 -gencode arch=compute_60,code=sm_60 \
+    -gencode arch=compute_86,code=sm_86 \
+ -o s4 s4.cu  /home/darrell/work/git/primesieve/libprimesieve.a -std=c++14 --expt-relaxed-constexpr -Xcompiler="-fpermissive" -lnvidia-ml
       patchelf --set-rpath '/run/opengl-driver/lib:'$(patchelf --print-rpath s4) s4
-      '';
+      patchelf --add-rpath /usr/lib/x86_64-linux-gnu s4
+     '';
     compileS3.exec = ''
       nvcc -arch=sm_86 -o s3 s3.cu /home/darrell/work/git/primesieve/libprimesieve.a -std=c++14 --expt-relaxed-constexpr -Xcompiler="-fpermissive" -lnvidia-ml
       patchelf --set-rpath '/run/opengl-driver/lib:'$(patchelf --print-rpath s3) s3
