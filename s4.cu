@@ -28,7 +28,7 @@ __global__ void computeSum(double* partialSums, const char* signs, long long sta
 
     // Initialize shared memory with the computed term for each thread
     double term = 0.0;
-    if (i <= maxN && i <= end) {
+    if (i <= maxN && i <= end && signs[i - start] != -1) {
         term = 1.0 / i;
         if (signs[i - start] == 0 && i > 4) {
             term = -term;
@@ -92,14 +92,14 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
     for (int i = 0; i < numStreams; ++i) {
         cudaStreamCreate(&streams[i]);
     }
-
+    std::cerr << highestPrime << std::endl;
+    bool currentSign = true;  // Start with positive sign
     // Process chunks of the range from 0 to highestPrime
     while (start < highestPrime) {
         long long end = std::min(start + chunkSize, highestPrime);
         std::vector<long long> primes;
         primesieve::generate_primes(start + 1, end, &primes);
         int numPrimes = primes.size();
-
         // Error checking for empty prime chunk
         if (numPrimes == 0) {
             std::cerr << "No primes found in the current chunk: start = " << start << ", end = " << end << std::endl;
@@ -109,7 +109,7 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
 
         // Create signs array on host
         std::vector<char> signs(chunkSize, 1);
-        bool currentSign = true;  // Start with positive sign
+        //bool currentSign = true;  // Start with positive sign
         long long previousPrimeIndex = 0;
         for (int i = 0; i < numPrimes; ++i) {
             long long primeIndex = primes[i] - (start + 1);
@@ -121,7 +121,11 @@ void calculateSumInChunks(long long highestPrime, long long maxN, int chunkSize)
         }
         // Fill the remaining signs after the last prime in the chunk
         for (long long j = previousPrimeIndex; j < chunkSize; ++j) {
-            signs[j] = currentSign ? 1 : 0;
+           if(highestPrime-primes.back() < chunkSize){
+		signs[j] = -1;
+	   }else{
+	       	signs[j] = currentSign ? 1 : 0;
+	   }
         }
 
         // Use multiple streams to copy data and launch kernels
@@ -200,7 +204,7 @@ int main(int argc, char* argv[]) {
     long long maxN = highestPrime;
 
     // Define chunk size for handling large number of primes (increased to improve GPU utilization)
-    int chunkSize = 10000000;  // Further increased chunk size to improve GPU utilization
+    int chunkSize = 1000000;  // Further increased chunk size to improve GPU utilization
 
     // Call calculateSumInChunks to handle large prime arrays in chunks
     calculateSumInChunks(highestPrime, maxN, chunkSize);
